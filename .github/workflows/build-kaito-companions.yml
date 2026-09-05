@@ -1,0 +1,103 @@
+name: Build Kaito companion IPAs
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - kaito-companion-build-v1
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Environment
+        run: |
+          set -euxo pipefail
+          sw_vers
+          xcodebuild -version
+          python3 --version
+
+      - name: Install build tools
+        run: |
+          set -euxo pipefail
+          brew install xcodegen
+          python3 -m pip install --user pillow
+
+      - name: Generate app icons
+        run: python3 tools/make_icons.py
+
+      - name: Generate Xcode project
+        working-directory: companions
+        run: xcodegen generate
+
+      - name: Build AI Screen Bridge
+        working-directory: companions
+        run: |
+          set -euxo pipefail
+          rm -rf build-screen out-screen
+          xcodebuild \
+            -project KaitoCompanions.xcodeproj \
+            -scheme AIScreenBridge \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build-screen \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+          APP="$(find build-screen/Build/Products/Release-iphoneos -maxdepth 1 -type d -name 'AIScreenBridge.app' -print -quit)"
+          test -n "$APP"
+          test -f "$APP/AIScreenBridge"
+          file "$APP/AIScreenBridge"
+          test -d "$APP/PlugIns/ScreenBridgeBroadcast.appex"
+          test -f "$APP/PlugIns/ScreenBridgeBroadcast.appex/ScreenBridgeBroadcast"
+          file "$APP/PlugIns/ScreenBridgeBroadcast.appex/ScreenBridgeBroadcast"
+          mkdir -p out-screen/Payload
+          cp -R "$APP" out-screen/Payload/
+          (cd out-screen && zip -qry ../AI-Screen-Bridge-v1.1-unsigned.ipa Payload)
+          test -s AI-Screen-Bridge-v1.1-unsigned.ipa
+
+      - name: Build Kaito Layout
+        working-directory: companions
+        run: |
+          set -euxo pipefail
+          rm -rf build-layout out-layout
+          xcodebuild \
+            -project KaitoCompanions.xcodeproj \
+            -scheme LayoutManager \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build-layout \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+          APP="$(find build-layout/Build/Products/Release-iphoneos -maxdepth 1 -type d -name 'LayoutManager.app' -print -quit)"
+          test -n "$APP"
+          test -f "$APP/LayoutManager"
+          file "$APP/LayoutManager"
+          mkdir -p out-layout/Payload
+          cp -R "$APP" out-layout/Payload/
+          (cd out-layout && zip -qry ../Kaito-Layout-v1.1-unsigned.ipa Payload)
+          test -s Kaito-Layout-v1.1-unsigned.ipa
+
+      - name: Package checksums
+        working-directory: companions
+        run: |
+          shasum -a 256 AI-Screen-Bridge-v1.1-unsigned.ipa Kaito-Layout-v1.1-unsigned.ipa > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload IPAs
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kaito-iPad-Companions-v1.1
+          path: |
+            companions/AI-Screen-Bridge-v1.1-unsigned.ipa
+            companions/Kaito-Layout-v1.1-unsigned.ipa
+            companions/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
