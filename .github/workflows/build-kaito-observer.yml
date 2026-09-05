@@ -1,0 +1,84 @@
+name: Build Kaito Observer IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - kaito-observer-v1
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Environment
+        run: |
+          set -euxo pipefail
+          sw_vers
+          xcodebuild -version
+          python3 --version
+
+      - name: Install build tools
+        run: |
+          set -euxo pipefail
+          brew install xcodegen
+          python3 -m venv .venv
+          .venv/bin/pip install pillow
+
+      - name: Generate app icons
+        run: .venv/bin/python tools/make_icons.py
+
+      - name: Generate Xcode project
+        working-directory: companions
+        run: xcodegen generate
+
+      - name: Build Kaito Observer
+        working-directory: companions
+        run: |
+          set -euxo pipefail
+          rm -rf build-observer out-observer
+          xcodebuild \
+            -project KaitoCompanions.xcodeproj \
+            -scheme KaitoObserver \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build-observer \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+          APP="$(find build-observer/Build/Products/Release-iphoneos -maxdepth 1 -type d -name 'KaitoObserver.app' -print -quit)"
+          test -n "$APP"
+          test -f "$APP/KaitoObserver"
+          file "$APP/KaitoObserver"
+          test -d "$APP/PlugIns/KaitoObserverBroadcast.appex"
+          test -f "$APP/PlugIns/KaitoObserverBroadcast.appex/KaitoObserverBroadcast"
+          file "$APP/PlugIns/KaitoObserverBroadcast.appex/KaitoObserverBroadcast"
+          plutil -p "$APP/Info.plist"
+          plutil -p "$APP/PlugIns/KaitoObserverBroadcast.appex/Info.plist"
+
+          mkdir -p out-observer/Payload
+          cp -R "$APP" out-observer/Payload/
+          (cd out-observer && zip -qry ../Kaito-Observer-v1.0-unsigned.ipa Payload)
+          test -s Kaito-Observer-v1.0-unsigned.ipa
+
+      - name: Package checksum
+        working-directory: companions
+        run: |
+          shasum -a 256 Kaito-Observer-v1.0-unsigned.ipa > Kaito-Observer-v1.0-SHA256.txt
+          cat Kaito-Observer-v1.0-SHA256.txt
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kaito-Observer-v1.0
+          path: |
+            companions/Kaito-Observer-v1.0-unsigned.ipa
+            companions/Kaito-Observer-v1.0-SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
