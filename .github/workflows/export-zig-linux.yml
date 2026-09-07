@@ -1,0 +1,30 @@
+name: Export Zig Linux 0.13.0
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/export-zig-linux.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Zig Python wheel
+        run: |
+          set -euxo pipefail
+          python3 -m pip install --target zig-export ziglang==0.13.0
+          PYTHONPATH="$PWD/zig-export" python3 -m ziglang version
+          find zig-export -maxdepth 2 -type f | head -50
+      - name: Upload Zig
+        uses: actions/upload-artifact@v4
+        with:
+          name: ziglang-linux-0.13.0
+          path: zig-export
+          if-no-files-found: error
+          retention-days: 1
